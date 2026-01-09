@@ -2,13 +2,15 @@
 // Users need to configure it in the extension options page
 
 // Default model timeline for null models
+// Each entry represents when that model became the default
 const DEFAULT_MODEL_TIMELINE = [
   { date: new Date('2024-01-01'), model: 'claude-3-sonnet-20240229' }, // Before June 20, 2024
   { date: new Date('2024-06-20'), model: 'claude-3-5-sonnet-20240620' }, // Starting June 20, 2024
   { date: new Date('2024-10-22'), model: 'claude-3-5-sonnet-20241022' }, // Starting October 22, 2024
-  { date: new Date('2025-02-29'), model: 'claude-3-7-sonnet-20250219' }, // Starting February 29, 2025
-  { date: new Date('2025-05-14'), model: 'claude-sonnet-4-20250514' }, // Starting May 14, 2025
-  { date: new Date('2025-09-29'), model: 'claude-sonnet-4-5-20250929' } // Starting September 29, 2025
+  { date: new Date('2025-02-24'), model: 'claude-3-7-sonnet-20250219' }, // Starting February 24, 2025
+  { date: new Date('2025-05-22'), model: 'claude-sonnet-4-20250514' }, // Starting May 22, 2025
+  { date: new Date('2025-09-29'), model: 'claude-sonnet-4-5-20250929' }, // Starting September 29, 2025
+  { date: new Date('2025-11-01'), model: 'claude-opus-4-5-20251101' } // Starting November 1, 2025
 ];
 
 // Infer model for conversations with null model based on date
@@ -253,11 +255,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log(`Fetched ${conversations.length} conversations`);
         
         if (request.format === 'json') {
-          // For JSON, export as a single file with all conversations
+          // For JSON, fetch full conversation data for each
+          const fullConversations = [];
+          let errors = [];
+          
+          for (let i = 0; i < conversations.length; i++) {
+            const conv = conversations[i];
+            try {
+              console.log(`Fetching full conversation ${i + 1}/${conversations.length}: ${conv.uuid}`);
+              const fullConv = await fetchConversation(request.orgId, conv.uuid);
+              
+              // Infer model if null
+              fullConv.model = inferModel(fullConv);
+              
+              fullConversations.push(fullConv);
+              
+              // Add a small delay to avoid overwhelming the API
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+              console.error(`Failed to fetch conversation ${conv.uuid}:`, error);
+              errors.push(`${conv.name || conv.uuid}: ${error.message}`);
+            }
+          }
+          
           const filename = `claude-all-conversations-${new Date().toISOString().split('T')[0]}.json`;
           console.log('Downloading all conversations as JSON:', filename);
-          downloadFile(JSON.stringify(conversations, null, 2), filename);
-          sendResponse({ success: true, count: conversations.length });
+          downloadFile(JSON.stringify(fullConversations, null, 2), filename);
+          
+          if (errors.length > 0) {
+            sendResponse({ 
+              success: true, 
+              count: fullConversations.length, 
+              warnings: `Exported ${fullConversations.length}/${conversations.length} conversations. Some failed: ${errors.join('; ')}` 
+            });
+          } else {
+            sendResponse({ success: true, count: fullConversations.length });
+          }
         } else {
           // For other formats, create individual files
           let count = 0;
